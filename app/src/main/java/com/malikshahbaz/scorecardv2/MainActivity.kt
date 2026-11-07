@@ -2,8 +2,8 @@ package com.malikshahbaz.scorecardv2
 
 import androidx.compose.foundation.verticalScroll
 import android.os.Bundle
-package com.malikshahbaz.scorecardv2
-
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
