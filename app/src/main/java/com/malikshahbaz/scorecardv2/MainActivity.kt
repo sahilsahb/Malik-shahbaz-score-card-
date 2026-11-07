@@ -1,12 +1,14 @@
-
+import androidx.compose.foundation.verticalScroll
 package com.malikshahbaz.scorecardv2
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -19,11 +21,13 @@ import androidx.compose.ui.unit.sp
 private val Navy = Color(0xFF071B36)
 private val Blue = Color(0xFF174477)
 private val Gold = Color(0xFFFFC857)
+private val Background = Color(0xFFF1F4F8)
 
-data class BallState(
+data class ScoreSnapshot(
     val runs: Int,
     val wickets: Int,
-    val balls: Int
+    val balls: Int,
+    val extras: Int
 )
 
 class MainActivity : ComponentActivity() {
@@ -40,353 +44,764 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun ScoreCardApp() {
     var page by remember { mutableStateOf("home") }
+
     var teamA by remember { mutableStateOf("Team A") }
     var teamB by remember { mutableStateOf("Team B") }
     var format by remember { mutableStateOf("T20") }
     var oversLimit by remember { mutableIntStateOf(20) }
-    var battingFirst by remember { mutableStateOf(true) }
+    var battingFirst by remember { mutableStateOf("Team A") }
 
-    var innings by remember { mutableIntStateOf(1) }
-    var score by remember { mutableIntStateOf(0) }
+    var inningsNumber by remember { mutableIntStateOf(1) }
+    var battingTeam by remember { mutableStateOf("Team A") }
+    var bowlingTeam by remember { mutableStateOf("Team B") }
+
+    var runs by remember { mutableIntStateOf(0) }
     var wickets by remember { mutableIntStateOf(0) }
     var balls by remember { mutableIntStateOf(0) }
-    var firstScore by remember { mutableIntStateOf(0) }
+    var extras by remember { mutableIntStateOf(0) }
 
-    val undoList = remember { mutableStateListOf<BallState>() }
+    var firstInningsRuns by remember { mutableIntStateOf(0) }
+    var secondInningsRuns by remember { mutableIntStateOf(0) }
+    var matchResult by remember { mutableStateOf("") }
 
-    val battingTeam = if (innings == 1) {
-        if (battingFirst) teamA else teamB
-    } else {
-        if (battingFirst) teamB else teamA
+    val undoList = remember { mutableStateListOf<ScoreSnapshot>() }
+    val history = remember { mutableStateListOf<String>() }
+
+    fun startMatch() {
+        inningsNumber = 1
+        runs = 0
+        wickets = 0
+        balls = 0
+        extras = 0
+        firstInningsRuns = 0
+        secondInningsRuns = 0
+        undoList.clear()
+
+        battingTeam = battingFirst
+        bowlingTeam = if (battingFirst == teamA) teamB else teamA
+        page = "score"
     }
 
-    fun addBall(runs: Int = 0, wicket: Boolean = false, legal: Boolean = true) {
-        if (balls >= oversLimit * 6 || wickets >= 10) return
+    fun addDelivery(
+        totalRuns: Int = 0,
+        extraRuns: Int = 0,
+        wicket: Boolean = false,
+        legal: Boolean = true
+    ) {
+        if (wickets >= 10 || balls >= oversLimit * 6) return
 
-        undoList.add(BallState(score, wickets, balls))
-        score += runs
+        undoList.add(
+            ScoreSnapshot(runs, wickets, balls, extras)
+        )
+
+        runs += totalRuns
+        extras += extraRuns
+
         if (wicket) wickets++
         if (legal) balls++
+
+        if (inningsNumber == 2 && runs > firstInningsRuns) {
+            secondInningsRuns = runs
+            matchResult = "$battingTeam won by ${10 - wickets} wickets"
+            history.add(0, matchResult)
+            page = "result"
+        } else if (wickets >= 10 || balls >= oversLimit * 6) {
+            if (inningsNumber == 1) {
+                firstInningsRuns = runs
+                inningsNumber = 2
+
+                val oldBatting = battingTeam
+                battingTeam = bowlingTeam
+                bowlingTeam = oldBatting
+
+                runs = 0
+                wickets = 0
+                balls = 0
+                extras = 0
+                undoList.clear()
+            } else {
+                secondInningsRuns = runs
+                matchResult = when {
+                    secondInningsRuns > firstInningsRuns ->
+                        "$battingTeam won by ${10 - wickets} wickets"
+                    secondInningsRuns < firstInningsRuns ->
+                        "$bowlingTeam won by ${firstInningsRuns - secondInningsRuns} runs"
+                    else -> "Match Tied"
+                }
+                history.add(0, matchResult)
+                page = "result"
+            }
+        }
     }
 
-    fun undoBall() {
+    fun undoDelivery() {
         if (undoList.isNotEmpty()) {
             val old = undoList.removeAt(undoList.lastIndex)
-            score = old.runs
+            runs = old.runs
             wickets = old.wickets
             balls = old.balls
+            extras = old.extras
         }
     }
 
     Surface(
         modifier = Modifier.fillMaxSize(),
-        color = Navy
+        color = Background
     ) {
         when (page) {
-            "home" -> Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                Text("🏏", fontSize = 65.sp)
-                Text(
-                    "MALIK SHAHBAZ",
-                    color = Gold,
-                    fontSize = 27.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Text("SCORE CARD V2", color = Color.White, fontSize = 21.sp)
-                Spacer(Modifier.height(30.dp))
-                MainButton("NEW MATCH") { page = "setup" }
-                MainButton("ABOUT APP") { page = "about" }
-            }
+            "home" -> HomeScreen(
+                onNewMatch = { page = "setup" },
+                onHistory = { page = "history" },
+                onAbout = { page = "about" }
+            )
 
-            "setup" -> Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-                    .padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Heading("NEW MATCH")
-
-                OutlinedTextField(
-                    value = teamA,
-                    onValueChange = { teamA = it },
-                    label = { Text("Team A") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                OutlinedTextField(
-                    value = teamB,
-                    onValueChange = { teamB = it },
-                    label = { Text("Team B") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Text("Match Format", color = Color.White)
-
-                Row {
-                    listOf("T20", "ODI", "Test").forEach { item ->
-                        FilterChip(
-                            selected = format == item,
-                            onClick = {
-                                format = item
-                                oversLimit = when (item) {
-                                    "T20" -> 20
-                                    "ODI" -> 50
-                                    else -> 90
-                                }
-                            },
-                            label = { Text(item) }
-                        )
-                        Spacer(Modifier.width(6.dp))
+            "setup" -> SetupScreen(
+                teamA = teamA,
+                teamB = teamB,
+                format = format,
+                overs = oversLimit,
+                battingFirst = battingFirst,
+                onTeamA = { teamA = it },
+                onTeamB = { teamB = it },
+                onFormat = {
+                    format = it
+                    oversLimit = when (it) {
+                        "T20" -> 20
+                        "ODI" -> 50
+                        else -> 90
                     }
-                }
+                },
+                onOvers = { oversLimit = it },
+                onBattingFirst = { battingFirst = it },
+                onStart = { startMatch() },
+                onBack = { page = "home" }
+            )
 
-                OutlinedTextField(
-                    value = oversLimit.toString(),
-                    onValueChange = {
-                        it.toIntOrNull()?.let { number ->
-                            if (number in 1..500) oversLimit = number
-                        }
-                    },
-                    label = { Text("Overs") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Text("Batting First", color = Gold)
-
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    RadioButton(
-                        selected = battingFirst,
-                        onClick = { battingFirst = true }
-                    )
-                    Text(teamA, color = Color.White)
-                    RadioButton(
-                        selected = !battingFirst,
-                        onClick = { battingFirst = false }
-                    )
-                    Text(teamB, color = Color.White)
-                }
-
-                MainButton("START MATCH") {
-                    score = 0
-                    wickets = 0
-                    balls = 0
-                    firstScore = 0
-                    innings = 1
-                    undoList.clear()
-                    page = "score"
-                }
-
-                BackButton { page = "home" }
-            }
-
-            "score" -> Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-                    .padding(16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Heading("LIVE SCORE")
-
-                Text(battingTeam, color = Color.White, fontSize = 22.sp)
-
-                Text(
-                    "$score / $wickets",
-                    color = Gold,
-                    fontSize = 48.sp,
-                    fontWeight = FontWeight.Bold
-                )
-
-                Text(
-                    "Overs: ${balls / 6}.${balls % 6} / $oversLimit",
-                    color = Color.White,
-                    fontSize = 20.sp
-                )
-
-                Text("Innings $innings", color = Gold)
-
-                Spacer(Modifier.height(18.dp))
-                Heading("ADD RUNS")
-
-                Row(Modifier.fillMaxWidth()) {
-                    (0..3).forEach { run ->
-                        ScoreButton(run.toString(), Modifier.weight(1f)) {
-                            addBall(runs = run)
-                        }
-                    }
-                }
-
-                Row(Modifier.fillMaxWidth()) {
-                    (4..6).forEach { run ->
-                        ScoreButton(run.toString(), Modifier.weight(1f)) {
-                            addBall(runs = run)
-                        }
-                    }
-                    ScoreButton("W", Modifier.weight(1f)) {
-                        addBall(wicket = true)
-                    }
-                }
-
-                Spacer(Modifier.height(12.dp))
-                Heading("EXTRAS")
-
-                Row(Modifier.fillMaxWidth()) {
-                    ScoreButton("WD", Modifier.weight(1f)) {
-                        addBall(runs = 1, legal = false)
-                    }
-                    ScoreButton("NB", Modifier.weight(1f)) {
-                        addBall(runs = 1, legal = false)
-                    }
-                    ScoreButton("B", Modifier.weight(1f)) {
-                        addBall(runs = 1)
-                    }
-                    ScoreButton("LB", Modifier.weight(1f)) {
-                        addBall(runs = 1)
-                    }
-                }
-
-                Spacer(Modifier.height(18.dp))
-
-                MainButton("UNDO LAST BALL") {
-                    undoBall()
-                }
-
-                MainButton(
-                    if (innings == 1) "NEXT INNINGS" else "FINISH MATCH"
-                ) {
-                    if (innings == 1) {
-                        firstScore = score
-                        innings = 2
-                        score = 0
+            "score" -> ScoreScreen(
+                battingTeam = battingTeam,
+                bowlingTeam = bowlingTeam,
+                inningsNumber = inningsNumber,
+                runs = runs,
+                wickets = wickets,
+                balls = balls,
+                extras = extras,
+                oversLimit = oversLimit,
+                target = if (inningsNumber == 2) firstInningsRuns + 1 else null,
+                onRun = { addDelivery(totalRuns = it) },
+                onWide = { addDelivery(1, 1, legal = false) },
+                onNoBall = { addDelivery(1, 1, legal = false) },
+                onBye = { addDelivery(1, 1) },
+                onLegBye = { addDelivery(1, 1) },
+                onWicket = { addDelivery(wicket = true) },
+                onUndo = { undoDelivery() },
+                onEndInnings = {
+                    if (inningsNumber == 1) {
+                        firstInningsRuns = runs
+                        inningsNumber = 2
+                        val oldBatting = battingTeam
+                        battingTeam = bowlingTeam
+                        bowlingTeam = oldBatting
+                        runs = 0
                         wickets = 0
                         balls = 0
+                        extras = 0
                         undoList.clear()
                     } else {
+                        secondInningsRuns = runs
+                        matchResult = when {
+                            runs > firstInningsRuns ->
+                                "$battingTeam won by ${10 - wickets} wickets"
+                            runs < firstInningsRuns ->
+                                "$bowlingTeam won by ${firstInningsRuns - runs} runs"
+                            else -> "Match Tied"
+                        }
+                        history.add(0, matchResult)
                         page = "result"
                     }
                 }
+            )
 
-                BackButton { page = "home" }
-            }
+            "result" -> ResultScreen(
+                teamA = teamA,
+                teamB = teamB,
+                firstScore = firstInningsRuns,
+                secondScore = secondInningsRuns,
+                result = matchResult,
+                onHome = { page = "home" },
+                onHistory = { page = "history" }
+            )
 
-            "result" -> Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                Heading("MATCH RESULT")
+            "history" -> HistoryScreen(
+                history = history.toList(),
+                onBack = { page = "home" }
+            )
 
-                Text(
-                    "$teamA / $firstScore",
-                    color = Color.White,
-                    fontSize = 20.sp
-                )
-
-                Text(
-                    "$teamB / $score",
-                    color = Color.White,
-                    fontSize = 20.sp
-                )
-
-                Spacer(Modifier.height(15.dp))
-
-                Text(
-                    when {
-                        score > firstScore ->
-                            "$battingTeam won!"
-                        score == firstScore ->
-                            "Match Tied"
-                        else ->
-                            "First innings team won!"
-                    },
-                    color = Gold,
-                    fontSize = 23.sp,
-                    fontWeight = FontWeight.Bold
-                )
-
-                MainButton("HOME") { page = "home" }
-            }
-
-            "about" -> Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                Heading("ABOUT APP")
-                Text(
-                    "Malik Shahbaz Score Card V2",
-                    color = Color.White,
-                    fontSize = 20.sp
-                )
-                Text(
-                    "Cricket scoring application",
-                    color = Gold
-                )
-                BackButton { page = "home" }
-            }
+            "about" -> AboutScreen(
+                onBack = { page = "home" }
+            )
         }
     }
 }
 
 @Composable
-fun Heading(text: String) {
-    Text(
-        text,
-        color = Gold,
-        fontSize = 25.sp,
-        fontWeight = FontWeight.Bold
-    )
-    Spacer(Modifier.height(12.dp))
+fun HomeScreen(
+    onNewMatch: () -> Unit,
+    onHistory: () -> Unit,
+    onAbout: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Navy)
+            .padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text("🏏", fontSize = 72.sp)
+        Text(
+            "MALIK SHAHBAZ",
+            color = Gold,
+            fontSize = 28.sp,
+            fontWeight = FontWeight.Black
+        )
+        Text(
+            "SCORE CARD V2",
+            color = Color.White,
+            fontSize = 21.sp,
+            fontWeight = FontWeight.Bold
+        )
+
+        Spacer(Modifier.height(40.dp))
+
+        MenuButton("NEW MATCH", onNewMatch)
+        MenuButton("MATCH HISTORY", onHistory)
+        MenuButton("ABOUT APP", onAbout)
+
+        Spacer(Modifier.height(25.dp))
+        Text(
+            "OFFLINE CRICKET SCORING",
+            color = Color.LightGray,
+            fontSize = 12.sp
+        )
+    }
 }
 
 @Composable
-fun MainButton(text: String, onClick: () -> Unit) {
+fun MenuButton(title: String, onClick: () -> Unit) {
     Button(
         onClick = onClick,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 5.dp)
-            .height(52.dp),
+            .padding(vertical = 7.dp)
+            .height(55.dp),
         colors = ButtonDefaults.buttonColors(
-            containerColor = Blue
-        )
+            containerColor = Gold,
+            contentColor = Navy
+        ),
+        shape = RoundedCornerShape(14.dp)
     ) {
-        Text(text, color = Gold, fontWeight = FontWeight.Bold)
+        Text(title, fontWeight = FontWeight.Bold)
     }
 }
 
 @Composable
-fun BackButton(onClick: () -> Unit) {
-    TextButton(onClick = onClick) {
-        Text("BACK", color = Gold)
-    }
-}
-
-@Composable
-fun ScoreButton(
-    text: String,
-    modifier: Modifier,
-    onClick: () -> Unit
+fun SetupScreen(
+    teamA: String,
+    teamB: String,
+    format: String,
+    overs: Int,
+    battingFirst: String,
+    onTeamA: (String) -> Unit,
+    onTeamB: (String) -> Unit,
+    onFormat: (String) -> Unit,
+    onOvers: (Int) -> Unit,
+    onBattingFirst: (String) -> Unit,
+    onStart: () -> Unit,
+    onBack: () -> Unit
 ) {
-    Button(
-        onClick = onClick,
-        modifier = modifier
-            .padding(3.dp)
-            .height(50.dp),
-        colors = ButtonDefaults.buttonColors(
-            containerColor = Blue
-        )
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Background)
+            .padding(20.dp)
+            .verticalScroll(
+                androidx.compose.foundation.rememberScrollState()
+            )
     ) {
-        Text(text, color = Gold, fontWeight = FontWeight.Bold)
+        Text(
+            "NEW MATCH",
+            color = Navy,
+            fontSize = 27.sp,
+            fontWeight = FontWeight.Bold
+        )
+
+        Spacer(Modifier.height(20.dp))
+
+        OutlinedTextField(
+            value = teamA,
+            onValueChange = onTeamA,
+            label = { Text("Team A name") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true
+        )
+
+        Spacer(Modifier.height(12.dp))
+
+        OutlinedTextField(
+            value = teamB,
+            onValueChange = onTeamB,
+            label = { Text("Team B name") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true
+        )
+
+        Spacer(Modifier.height(20.dp))
+
+        Text(
+            "MATCH FORMAT",
+            color = Navy,
+            fontWeight = FontWeight.Bold
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            listOf("T20", "ODI", "Test").forEach { option ->
+                FilterChip(
+                    selected = format == option,
+                    onClick = { onFormat(option) },
+                    label = { Text(option) }
+                )
+            }
+        }
+
+        Spacer(Modifier.height(15.dp))
+
+        Text(
+            "OVERS: $overs",
+            color = Navy,
+            fontWeight = FontWeight.Bold
+        )
+
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            listOf(5, 10, 20, 50, 90).forEach { value ->
+                FilterChip(
+                    selected = overs == value,
+                    onClick = { onOvers(value) },
+                    label = { Text("$value") }
+                )
+            }
+        }
+
+        Spacer(Modifier.height(20.dp))
+
+        Text(
+            "WHO WILL BAT FIRST?",
+            color = Navy,
+            fontWeight = FontWeight.Bold
+        )
+
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            FilterChip(
+                selected = battingFirst == teamA,
+                onClick = { onBattingFirst(teamA) },
+                label = { Text(teamA) }
+            )
+
+            FilterChip(
+                selected = battingFirst == teamB,
+                onClick = { onBattingFirst(teamB) },
+                label = { Text(teamB) }
+            )
+        }
+
+        Spacer(Modifier.height(30.dp))
+
+        Button(
+            onClick = onStart,
+            enabled = teamA.isNotBlank() &&
+                teamB.isNotBlank() &&
+                teamA != teamB,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(55.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Blue
+            )
+        ) {
+            Text(
+                "START MATCH",
+                fontWeight = FontWeight.Bold
+            )
+        }
+
+        TextButton(
+            onClick = onBack,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("BACK")
+        }
+    }
+}
+
+@Composable
+fun ScoreScreen(
+    battingTeam: String,
+    bowlingTeam: String,
+    inningsNumber: Int,
+    runs: Int,
+    wickets: Int,
+    balls: Int,
+    extras: Int,
+    oversLimit: Int,
+    target: Int?,
+    onRun: (Int) -> Unit,
+    onWide: () -> Unit,
+    onNoBall: () -> Unit,
+    onBye: () -> Unit,
+    onLegBye: () -> Unit,
+    onWicket: () -> Unit,
+    onUndo: () -> Unit,
+    onEndInnings: () -> Unit
+) {
+    val overText = "${balls / 6}.${balls % 6}"
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Background)
+            .padding(16.dp)
+    ) {
+        Text(
+            "LIVE MATCH • INNINGS $inningsNumber",
+            color = Blue,
+            fontWeight = FontWeight.Bold
+        )
+
+        Spacer(Modifier.height(12.dp))
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = Navy
+            ),
+            shape = RoundedCornerShape(18.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(22.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    battingTeam,
+                    color = Gold,
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Text(
+                    "$runs/$wickets",
+                    color = Color.White,
+                    fontSize = 48.sp,
+                    fontWeight = FontWeight.Black
+                )
+
+                Text(
+                    "Overs: $overText / $oversLimit",
+                    color = Color.White,
+                    fontSize = 17.sp
+                )
+
+                Text(
+                    "Extras: $extras",
+                    color = Gold
+                )
+
+                if (target != null) {
+                    Text(
+                        "Target: $target",
+                        color = Gold,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        "Need ${maxOf(0, target - runs)} runs",
+                        color = Color.White
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.height(14.dp))
+
+        Text(
+            "RUNS",
+            color = Navy,
+            fontWeight = FontWeight.Bold
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(5.dp)
+        ) {
+            (0..6).forEach { value ->
+                Button(
+                    onClick = { onRun(value) },
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(0.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Blue
+                    )
+                ) {
+                    Text("$value")
+                }
+            }
+        }
+
+        Spacer(Modifier.height(14.dp))
+
+        Text(
+            "EXTRAS",
+            color = Navy,
+            fontWeight = FontWeight.Bold
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Button(
+                onClick = onWide,
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Gold,
+                    contentColor = Navy
+                )
+            ) { Text("WD") }
+
+            Button(
+                onClick = onNoBall,
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Gold,
+                    contentColor = Navy
+                )
+            ) { Text("NB") }
+
+            Button(
+                onClick = onBye,
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Gold,
+                    contentColor = Navy
+                )
+            ) { Text("B") }
+
+            Button(
+                onClick = onLegBye,
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Gold,
+                    contentColor = Navy
+                )
+            ) { Text("LB") }
+        }
+
+        Spacer(Modifier.height(10.dp))
+
+        Button(
+            onClick = onWicket,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Color(0xFFB3261E)
+            )
+        ) {
+            Text("WICKET")
+        }
+
+        Spacer(Modifier.height(10.dp))
+
+        OutlinedButton(
+            onClick = onUndo,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("UNDO LAST BALL")
+        }
+
+        Spacer(Modifier.weight(1f))
+
+        Button(
+            onClick = onEndInnings,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(52.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Navy
+            )
+        ) {
+            Text(
+                if (inningsNumber == 1) "END 1ST INNINGS"
+                else "END MATCH"
+            )
+        }
+
+        Text(
+            "Bowling: $bowlingTeam",
+            color = Blue,
+            modifier = Modifier.align(Alignment.CenterHorizontally)
+        )
+    }
+}
+
+@Composable
+fun ResultScreen(
+    teamA: String,
+    teamB: String,
+    firstScore: Int,
+    secondScore: Int,
+    result: String,
+    onHome: () -> Unit,
+    onHistory: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Navy)
+            .padding(22.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text("🏆", fontSize = 65.sp)
+
+        Text(
+            "MATCH RESULT",
+            color = Gold,
+            fontSize = 27.sp,
+            fontWeight = FontWeight.Bold
+        )
+
+        Spacer(Modifier.height(25.dp))
+
+        Text(
+            "$firstScore  -  $secondScore",
+            color = Color.White,
+            fontSize = 34.sp,
+            fontWeight = FontWeight.Bold
+        )
+
+        Spacer(Modifier.height(20.dp))
+
+        Text(
+            result,
+            color = Gold,
+            fontSize = 22.sp,
+            fontWeight = FontWeight.Bold
+        )
+
+        Spacer(Modifier.height(35.dp))
+
+        MenuButton("MATCH HISTORY", onHistory)
+        MenuButton("HOME", onHome)
+    }
+}
+
+@Composable
+fun HistoryScreen(
+    history: List<String>,
+    onBack: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Background)
+            .padding(20.dp)
+    ) {
+        Text(
+            "MATCH HISTORY",
+            color = Navy,
+            fontSize = 26.sp,
+            fontWeight = FontWeight.Bold
+        )
+
+        Spacer(Modifier.height(15.dp))
+
+        if (history.isEmpty()) {
+            Text("No matches completed yet.")
+        } else {
+            LazyColumn(
+                modifier = Modifier.weight(1f)
+            ) {
+                items(history) { item ->
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 5.dp)
+                    ) {
+                        Text(
+                            item,
+                            modifier = Modifier.padding(16.dp),
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+        }
+
+        Button(
+            onClick = onBack,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("BACK HOME")
+        }
+    }
+}
+
+@Composable
+fun AboutScreen(onBack: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Navy)
+            .padding(25.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text("🏏", fontSize = 65.sp)
+
+        Text(
+            "MALIK SHAHBAZ",
+            color = Gold,
+            fontSize = 26.sp,
+            fontWeight = FontWeight.Bold
+        )
+
+        Text(
+            "SCORE CARD V2",
+            color = Color.White,
+            fontSize = 20.sp
+        )
+
+        Spacer(Modifier.height(20.dp))
+
+        Text(
+            "An offline cricket scoring application.",
+            color = Color.White
+        )
+
+        Text(
+            "Version 2.0",
+            color = Gold
+        )
+
+        Spacer(Modifier.height(30.dp))
+
+        MenuButton("BACK", onBack)
     }
 }
